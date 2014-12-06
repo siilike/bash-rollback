@@ -1,0 +1,112 @@
+#!/bin/bash
+
+set -u
+set -e
+
+_ROLLBACKS=()
+
+_doRoll()
+{
+	set +e
+
+	local WHAT=("$@")
+
+	for ((i=${#WHAT[@]}-1; i >= 0; i--));
+	do
+		CMD=${WHAT[i]}
+
+		eval "$CMD;"
+
+		if [ $? -ne 0 ];
+		then
+			>&2 echo "Command failed: $CMD"
+			>&2 echo "# Rollback commands:"
+
+			for ((k=${#_ROLLBACKS[@]}-1; k >= 0; k--));
+			do
+				eval 'local R=("${'"${_ROLLBACKS[k]}"'_ROLLBACK[@]-"# none"}")'
+
+				>&2 echo "# ${_ROLLBACKS[k]}"
+
+				for ((j=${#R[@]}-1; j >= 0; j--));
+				do
+					>&2 echo "${R[j]}"
+				done
+			done
+
+			>&2 echo "# Teardown commands:"
+
+			for ((k=${#_ROLLBACKS[@]}-1; k >= 0; k--));
+			do
+				eval 'local R=("${'"${_ROLLBACKS[k]}"'_TEARDOWN[@]-"# none"}")'
+
+				>&2 echo "# teardown: ${_ROLLBACKS[k]}"
+
+				for ((j=${#R[@]}-1; j >= 0; j--));
+				do
+					>&2 echo "${R[j]}"
+				done
+			done
+
+			exit 1
+		fi
+	done
+}
+
+_saveTeardown()
+{
+	local NAME=$1
+	local WHERE=$2
+
+	shift 2
+
+	local WHAT=("$@")
+
+	echo "Saving $NAME teardown commands to $WHERE"
+
+	cat <<EOF > $WHERE
+#!/bin/bash
+
+set -u
+set -e
+
+EOF
+
+	for ((i=${#WHAT[@]}-1; i >= 0; i--));
+	do
+		cat <<< "${WHAT[i]}" >> $WHERE
+	done
+
+	chmod +x $WHERE
+}
+
+createRollback()
+{
+	NAME=$1
+
+	_ROLLBACKS+=("$NAME")
+
+	eval "${NAME}_ROLLBACK=()"
+	eval "${NAME}_TEARDOWN=()"
+	eval "${NAME}_STATUS=0"
+
+	eval "$2"'() { '"$NAME"'_ROLLBACK+=("$*"); }'
+
+	if [ -n "$4" ];
+	then
+		eval "$4"'() { '"$NAME"'_TEARDOWN+=("$*"); }'
+
+		if [ -n "$5" ];
+		then
+ 			eval "$5"'() { '"$2"' "$*"; '"$4"' "$*"; }'
+		fi
+	fi
+
+	eval "$NAME"'() { >&2 echo "Encountered an error in '"$NAME"', rolling back"; _doRoll "${'"$NAME"'_ROLLBACK[@]}"; '"$NAME"'_STATUS=1; }'
+	eval "$3"'() { echo "Finished in '"$NAME"', running teardown"; _doRoll "${'"$NAME"'_TEARDOWN[@]}"; }'
+
+	if [ -n "$6" ];
+	then
+		eval "$6"'() { _saveTeardown "'"$NAME"'" "$1" "${'"$NAME"'_TEARDOWN[@]}"; }'
+	fi
+}
