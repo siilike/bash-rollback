@@ -6,7 +6,7 @@ Simple rollback
 
     #!/bin/bash
     
-    . /data1/bin/rollback
+    . /path/to/rollback
     
     # create relevant functions:
     #   - rollback to initiate rollback
@@ -50,7 +50,7 @@ Teardown works just like rollback:
 
     #!/bin/bash
     
-    . /data1/bin/rollback
+    . /path/to/rollback
     
     # create relevant functions:
     #   - rollback to initiate rollback
